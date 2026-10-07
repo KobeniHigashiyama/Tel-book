@@ -33,3 +33,31 @@ func list() {
 	}
 }
 
+func random (min, max int) int  {
+	return rand.Intn(max - min) + min
+}
+
+func getString(l int64) string{
+	startChar:= "A"
+	temp:= ""
+	var i int64 = 1
+	for {
+		myRand:= random(MIN,MAX)
+		newChar:= string(startChar[0] + byte(myRand))
+		temp = temp +newChar
+		if i == l {
+			break
+		}
+		i++
+	}
+	return temp
+}
+
+func  populate( n int  , s  []Entry) {
+	for i := 0;  i < n; i ++ {
+		name:= getString(4)
+		suname:= getString(5)
+		n:= strconv.Itoa(random(100,199))
+		data = append(data, Entry{name, suname, n})
+	}
+}
