@@ -1,99 +1,237 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
-	"math/rand"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
 type Entry struct {
-	Name    string
-	Surname string
-	Tel     string
+	Name       string
+	Surname    string
+	Tel        string
+	LastAccess string
 }
 
-var data = []Entry{}
-var MIN = 0
-var MAX = 26
+// CSVFILE is relative to the directory from which the program is run.
+var CSVFILE = "csv.data"
 
-func search(key string) *Entry {
-	for i, v := range data {
-		if v.Tel == key {
-			return &data[i]
-		}
+var data = []Entry{}
+var index map[string]int
+
+func readCSVFile(filepath string) error {
+	f, err := os.Open(filepath)
+	if err != nil {
+		return err
 	}
+	defer f.Close()
+
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = 4
+	lines, err := reader.ReadAll()
+	if err != nil {
+		return err
+	}
+
+	entries := make([]Entry, 0, len(lines))
+	for _, line := range lines {
+		entries = append(entries, Entry{
+			Name:       line[0],
+			Surname:    line[1],
+			Tel:        line[2],
+			LastAccess: line[3],
+		})
+	}
+	data = entries
 	return nil
 }
 
-func list() {
-	for _, v := range data {
-		fmt.Println(v)
+func saveCSVFile(filepath string) error {
+	csvfile, err := os.Create(filepath)
+	if err != nil {
+		return err
 	}
-}
+	defer csvfile.Close()
 
-func random (min, max int) int  {
-	return rand.Intn(max - min) + min
-}
-
-func getString(l int64) string{
-	startChar:= "A"
-	temp:= ""
-	var i int64 = 1
-	for {
-		myRand:= random(MIN,MAX)
-		newChar:= string(startChar[0] + byte(myRand))
-		temp = temp +newChar
-		if i == l {
-			break
+	csvwriter := csv.NewWriter(csvfile)
+	for _, row := range data {
+		temp := []string{row.Name, row.Surname, row.Tel, row.LastAccess}
+		if err := csvwriter.Write(temp); err != nil {
+			return err
 		}
-		i++
 	}
-	return temp
+	csvwriter.Flush()
+	if err := csvwriter.Error(); err != nil {
+		return err
+	}
+	return csvfile.Close()
 }
 
-func  populate( n int  , s  []Entry) {
-	for i := 0;  i < n; i ++ {
-		name:= getString(4)
-		suname:= getString(5)
-		n:= strconv.Itoa(random(100,199))
-		data = append(data, Entry{name, suname, n})
+func createIndex() error {
+	newIndex := make(map[string]int)
+	for i, entry := range data {
+		if _, ok := newIndex[entry.Tel]; ok {
+			return fmt.Errorf("%s already exists", entry.Tel)
+		}
+		newIndex[entry.Tel] = i
+	}
+	index = newIndex
+	return nil
+}
+
+func initS(N, S, T string) *Entry {
+	if T == "" || S == "" {
+		return nil
+	}
+	lastAccess := strconv.FormatInt(time.Now().Unix(), 10)
+	return &Entry{Name: N, Surname: S, Tel: T, LastAccess: lastAccess}
+}
+
+func insert(pS *Entry) error {
+	if pS == nil {
+		return fmt.Errorf("contact must not be nil")
+	}
+	if _, ok := index[pS.Tel]; ok {
+		return fmt.Errorf("%s already exists", pS.Tel)
+	}
+	data = append(data, *pS)
+	if err := createIndex(); err != nil {
+		return err
+	}
+	return saveCSVFile(CSVFILE)
+}
+
+func deleteEntry(key string) error {
+	i, ok := index[key]
+	if !ok {
+		return fmt.Errorf("%s cannot be found", key)
+	}
+	data = append(data[:i], data[i+1:]...)
+	// Removing an entry shifts the positions of the following contacts.
+	if err := createIndex(); err != nil {
+		return err
+	}
+	return saveCSVFile(CSVFILE)
+}
+
+func search(key string) (*Entry, error) {
+	i, ok := index[key]
+	if !ok {
+		return nil, nil
+	}
+	data[i].LastAccess = strconv.FormatInt(time.Now().Unix(), 10)
+	if err := saveCSVFile(CSVFILE); err != nil {
+		return nil, err
+	}
+	return &data[i], nil
+}
+
+func list() {
+	for _, entry := range data {
+		fmt.Println(entry)
 	}
 }
 
-func main () {
-	arguments:= os.Args
+func matchTel(s string) bool {
+	re := regexp.MustCompile(`^\d+$`)
+	return re.MatchString(s)
+}
+
+func main() {
+	arguments := os.Args
 	if len(arguments) == 1 {
-		fmt.Println("Usage search | list <arguments> ")
+		fmt.Println("Usage: insert|delete|search|list <arguments>")
 		return
 	}
 
-	SEED:=time.Now().Unix()
-	rand.Seed(SEED)
-
-	n:= 100
-	populate(n,data)
-	fmt.Printf("Data has %d entries.\n", len(data))
-
-
-	switch arguments[1]{
-	case "search":
-		if len(arguments) != 3 {
-			fmt.Println("Usage: search Tel number")
+	fileInfo, err := os.Stat(CSVFILE)
+	if os.IsNotExist(err) {
+		fmt.Println("Creating", CSVFILE)
+		f, err := os.Create(CSVFILE)
+		if err != nil {
+			fmt.Println(err)
 			return
 		}
-		temp:= search(arguments[2])
+		if err := f.Close(); err != nil {
+			fmt.Println(err)
+			return
+		}
+	} else if err != nil {
+		fmt.Println(err)
+		return
+	} else if !fileInfo.Mode().IsRegular() {
+		fmt.Println(CSVFILE, "not a regular file!")
+		return
+	}
+
+	if err := readCSVFile(CSVFILE); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := createIndex(); err != nil {
+		fmt.Println("Cannot create index:", err)
+		return
+	}
+
+	switch arguments[1] {
+	case "insert":
+		if len(arguments) != 5 {
+			fmt.Println("Usage: insert Name Surname Telephone")
+			return
+		}
+		t := strings.ReplaceAll(arguments[4], "-", "")
+		if !matchTel(t) {
+			fmt.Println("Not a valid telephone number:", t)
+			return
+		}
+		temp := initS(arguments[2], arguments[3], t)
 		if temp == nil {
-			fmt.Println("Entry not found:", arguments[2])
+			fmt.Println("Surname and telephone must not be empty")
+			return
+		}
+		if err := insert(temp); err != nil {
+			fmt.Println(err)
+		}
+	case "delete":
+		if len(arguments) != 3 {
+			fmt.Println("Usage: delete Number")
+			return
+		}
+		t := strings.ReplaceAll(arguments[2], "-", "")
+		if !matchTel(t) {
+			fmt.Println("Not a valid telephone number:", t)
+			return
+		}
+		if err := deleteEntry(t); err != nil {
+			fmt.Println(err)
+		}
+	case "search":
+		if len(arguments) != 3 {
+			fmt.Println("Usage: search Number")
+			return
+		}
+		t := strings.ReplaceAll(arguments[2], "-", "")
+		if !matchTel(t) {
+			fmt.Println("Not a valid telephone number:", t)
+			return
+		}
+		temp, err := search(t)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		if temp == nil {
+			fmt.Println("Number not found:", t)
 			return
 		}
 		fmt.Println(*temp)
 	case "list":
-			list()
+		list()
 	default:
 		fmt.Println("Not a valid option")
 	}
 }
-
-
