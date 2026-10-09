@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,11 +18,53 @@ type Entry struct {
 	LastAccess string
 }
 
+type PhoneBook []Entry
+
+// Len, Less и Swap реализуют sort.Interface для PhoneBook.
+func (a PhoneBook) Len() int {
+	return len(a)
+}
+
+func (a PhoneBook) Less(i, j int) bool {
+	if a[i].Surname == a[j].Surname {
+		return a[i].Name < a[j].Name
+	}
+	return a[i].Surname < a[j].Surname
+}
+
+func (a PhoneBook) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+
 // CSVFILE is relative to the directory from which the program is run.
 var CSVFILE = "csv.data"
 
-var data = []Entry{}
+var data = PhoneBook{}
 var index map[string]int
+
+func setCSVFile() error {
+	filepath := os.Getenv("PHONEBOOk")
+	if filepath != "" {
+		CSVFILE = filepath
+	}
+	_, err := os.Stat(CSVFILE)
+	if err != nil {
+		fmt.Println("Creating", CSVFILE)
+		f, err := os.Create(CSVFILE)
+		if err != nil {
+			f.Close()
+			return err
+		}
+		f.Close()
+	}
+	fileInfo, err := os.Stat(CSVFILE)
+	mode := fileInfo.Mode()
+	if !mode.IsRegular() {
+		return fmt.Errorf("%s not a regular file", CSVFILE)
+	}
+	return nil
+
+}
 
 func readCSVFile(filepath string) error {
 	f, err := os.Open(filepath)
@@ -131,6 +174,12 @@ func search(key string) (*Entry, error) {
 }
 
 func list() {
+	sort.Sort(data)
+	// После сортировки позиции контактов в срезе изменились.
+	if err := createIndex(); err != nil {
+		fmt.Println("Cannot create index:", err)
+		return
+	}
 	for _, entry := range data {
 		fmt.Println(entry)
 	}
